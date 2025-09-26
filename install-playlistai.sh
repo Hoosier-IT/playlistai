@@ -1,129 +1,40 @@
 #!/usr/bin/env bash
-# PlaylistAI LXC Installer
-# Description: AI-powered playlist generator using Music Assistant + local LLM
-# Author: (Hoosier-IT)
+# PlaylistAI LXC Installer (Adaptive + Robust)
+# Description: Deploys a Debian LXC running PlaylistAI (Flask API with Music Assistant + LLM integration)
+# Author: Michael (Hoosier-IT)
 # License: MIT
-# Version: 2.0 (adaptive)
+# Version: 3.0
 
 set -Eeuo pipefail
 
-# Interactive prompts
+# ===== Input prompts =====
 read -rp "🔗 Enter your Music Assistant API URL: " MA_API
 read -rp "🧠 Enter your LLM API URL: " LLM_API
 read -rp "🔐 Enter your Home Assistant token: " TOKEN
 read -rp "🎵 Enter your music folder path on Proxmox host (e.g., /mnt/music): " MUSIC_PATH
 
-# Constants
 APP="PlaylistAI"
 CTID=$(pvesh get /cluster/nextid)
-DISK_SIZE="4"
-MEMORY="1024"
+DISK_SIZE="4"       # GB
+MEMORY="1024"       # MB
 CORE_COUNT="2"
 
-# Detect latest Debian 12 template
-TEMPLATE=$(pveam available | awk '/debian-12-standard/ {print $2}' | tail -n1)
-if ! pveam list local | grep -q "$TEMPLATE"; then
-  echo "📥 Downloading template $TEMPLATE..."
-  pveam download local $TEMPLATE
-fi
+die() { echo "❌ $1" >&2; exit 1; }
 
-# Detect usable storage
-if pvesm status | awk '{print $1}' | grep -qx "local-lvm"; then
-  ROOTFS="--rootfs local-lvm:${DISK_SIZE}G"
-else
-  ROOTFS="--rootfs local:${DISK_SIZE}G"
-fi
+# ===== Ensure music path exists =====
+[ -d "$MUSIC_PATH" ] || { echo "📁 Creating $MUSIC_PATH"; mkdir -p "$MUSIC_PATH"; }
 
-# Detect bridge
-if ip link show vmbr0 >/dev/null 2>&1; then
+# ===== Detect bridge =====
+BRIDGES=$(ip -o link show | awk -F': ' '{print $2}' | grep -E '^vmbr[0-9]+')
+if grep -q '^vmbr0$' <<<"$BRIDGES"; then
   BRIDGE="vmbr0"
+elif [ "$(wc -w <<<"$BRIDGES")" -gt 1 ]; then
+  echo "🌉 Multiple bridges detected: $BRIDGES"
+  read -rp "Select bridge to use: " BRIDGE
 else
-  BRIDGE=$(ip -o link show | awk -F': ' '{print $2}' | grep vmbr | head -n1)
+  BRIDGE="$BRIDGES"
 fi
+[ -n "$BRIDGE" ] || die "No vmbr bridge found."
 
-echo "🧠 Creating $APP container (CT $CTID)..."
-pct create $CTID local:vztmpl/$TEMPLATE \
-  --hostname playlistai \
-  --cores $CORE_COUNT \
-  --memory $MEMORY \
-  --net0 name=eth0,bridge=$BRIDGE,ip=dhcp \
-  --ostype debian \
-  $ROOTFS \
-  --features nesting=1 \
-  --unprivileged 1 \
-  --mp0 ${MUSIC_PATH},mp=/data/music \
-  --start 1
-
-echo "📦 Installing Python and dependencies..."
-pct exec $CTID -- bash -c "
-  apt update &&
-  apt install -y python3 python3-pip &&
-  pip3 install flask requests python-dotenv
-"
-
-echo "📁 Creating PlaylistAI app files..."
-pct exec $CTID -- bash -c "mkdir -p /opt/playlistai"
-
-# app.py
-pct exec $CTID -- bash -c "cat << 'EOF' > /opt/playlistai/app.py
-import os
-import json
-import requests
-from flask import Flask, request, jsonify
-from dotenv import load_dotenv
-
-load_dotenv()
-app = Flask(__name__)
-
-MA_API = os.getenv('MA_API')
-LLM_API = os.getenv('LLM_API')
-TOKEN = os.getenv('TOKEN')
-
-def fetch_library():
-    headers = {'Authorization': f'Bearer {TOKEN}'}
-    response = requests.get(f'{MA_API}/media/library', headers=headers)
-    return response.json()
-
-def query_llm(library_json, prompt):
-    payload = {
-        'messages': [
-            {'role': 'system', 'content': 'You are a music curator.'},
-            {'role': 'user', 'content': f'{prompt}\\n\\n{json.dumps(library_json)}'}
-        ]
-    }
-    response = requests.post(LLM_API, json=payload)
-    return response.json()['choices'][0]['message']['content']
-
-@app.route('/generate', methods=['POST'])
-def generate_playlist():
-    prompt = request.json.get('prompt', '')
-    library = fetch_library()
-    playlist = query_llm(library, prompt)
-    return jsonify({'playlist': playlist})
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
-EOF"
-
-# requirements.txt
-pct exec $CTID -- bash -c "cat << 'EOF' > /opt/playlistai/requirements.txt
-flask
-requests
-python-dotenv
-EOF"
-
-# config.env
-pct exec $CTID -- bash -c "cat << EOF > /opt/playlistai/config.env
-MA_API=$MA_API
-LLM_API=$LLM_API
-TOKEN=$TOKEN
-EOF"
-
-echo "🚀 Starting PlaylistAI..."
-pct exec $CTID -- bash -c "
-  cd /opt/playlistai &&
-  nohup python3 app.py &
-"
-
-IP=$(pct exec $CTID -- hostname -I | awk '{print $1}')
-echo "✅ $APP is running at http://$IP:5000"
+# ===== Detect storage =====
+STORAGES=$(pvesm status | awk 'NR>1 {print $1}')
