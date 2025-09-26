@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# PlaylistAI LXC Installer (TTeck Framework Compatible, CT_ID-safe)
+# PlaylistAI LXC Installer (TTeck Framework Compatible, Robust CTID)
 # Author: Michael (Hoosier-IT)
 # License: MIT
-# Version: 4.2
+# Version: 4.3
 
-# Load TTeck/Community framework (build + core + api functions)
+# Load TTeck/Community framework
 source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
 
-# ======== Metadata / Defaults (consumed by the framework) ========
+# ======== Metadata / Defaults ========
 APP="PlaylistAI"
-var_os="debian"            # OS family
-var_version="12"           # Debian version
-var_unprivileged="1"       # Unprivileged container
-var_disk="4"               # GB
+var_os="debian"
+var_version="12"
+var_unprivileged="1"
+var_disk="4"        # GB
 var_cpu="2"
-var_ram="1024"             # MiB
+var_ram="1024"      # MiB
 var_tags="music;llm;flask"
-var_hostname="playlistai"  # Hostname of the LXC (used by the framework)
+var_hostname="playlistai"  # Used for CTID fallback resolution
 
 # ======== Post-install description ========
 function description() {
@@ -24,12 +24,28 @@ function description() {
   echo -e "Binds your host music folder into /data/music inside the container."
 }
 
-# ======== Post-creation steps (runs after the framework builds the CT) ========
-# IMPORTANT: Use CT_ID provided by the framework; do not resolve CTID yourself.
+# ======== Post-creation steps (framework calls this after CT is built) ========
 function update_script() {
   header_info
 
-  # Validate and collect inputs (no empty answers)
+  # Resolve CTID robustly (framework should set CTID; we add fallbacks)
+  local RESOLVED_CTID=""
+  if [ -n "${CTID:-}" ]; then
+    RESOLVED_CTID="$CTID"
+  else
+    # Try to find by expected hostname
+    RESOLVED_CTID=$(pct list | awk 'NR>1 && $4=="'"$var_hostname"'" {print $1}' | head -n1)
+    # Fallback: use most recent container ID from pct list
+    if [ -z "$RESOLVED_CTID" ]; then
+      RESOLVED_CTID=$(pct list | awk 'NR>1 {print $1}' | tail -n1)
+    end
+  fi
+  if [ -z "$RESOLVED_CTID" ]; then
+    msg_error "Could not resolve container ID (CTID). Aborting."
+    exit 1
+  fi
+
+  # Collect inputs (no empty answers)
   local MA_API="" LLM_API="" TOKEN="" MUSIC_PATH=""
   while [ -z "$MA_API" ]; do
     read -rp "🔗 Enter your Music Assistant API URL: " MA_API
@@ -50,12 +66,12 @@ function update_script() {
   if [ ! -d "$MUSIC_PATH" ]; then
     mkdir -p "$MUSIC_PATH" || { msg_error "Failed to create $MUSIC_PATH"; exit 1; }
   fi
-  pct set "$CT_ID" -mp0 "${MUSIC_PATH},mp=/data/music"
+  pct set "$RESOLVED_CTID" -mp0 "${MUSIC_PATH},mp=/data/music"
   msg_ok "Host music directory mounted to /data/music"
 
   # Install Python + venv inside the container
-  msg_info "Installing Python and dependencies in container $CT_ID"
-  pct exec "$CT_ID" -- bash -c "
+  msg_info "Installing Python and dependencies in container $RESOLVED_CTID"
+  pct exec "$RESOLVED_CTID" -- bash -c "
     set -Eeuo pipefail
     apt update
     apt install -y python3 python3-pip python3-venv ca-certificates curl
@@ -66,7 +82,7 @@ function update_script() {
 
   # Write application files
   msg_info "Creating PlaylistAI application files"
-  pct exec "$CT_ID" -- bash -c "cat << 'EOF' > /opt/playlistai/app.py
+  pct exec "$RESOLVED_CTID" -- bash -c "cat << 'EOF' > /opt/playlistai/app.py
 import os, json, requests
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
@@ -109,20 +125,20 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF"
 
-  pct exec "$CT_ID" -- bash -c "cat << 'EOF' > /opt/playlistai/requirements.txt
+  pct exec "$RESOLVED_CTID" -- bash -c "cat << 'EOF' > /opt/playlistai/requirements.txt
 flask
 requests
 python-dotenv
 EOF"
 
-  pct exec "$CT_ID" -- bash -c "cat << EOF > /opt/playlistai/config.env
+  pct exec "$RESOLVED_CTID" -- bash -c "cat << EOF > /opt/playlistai/config.env
 MA_API=$MA_API
 LLM_API=$LLM_API
 TOKEN=$TOKEN
 EOF"
 
   # Systemd service
-  pct exec "$CT_ID" -- bash -c "cat << 'EOF' > /etc/systemd/system/playlistai.service
+  pct exec "$RESOLVED_CTID" -- bash -c "cat << 'EOF' > /etc/systemd/system/playlistai.service
 [Unit]
 Description=PlaylistAI Service
 After=network.target
@@ -140,7 +156,7 @@ EOF"
 
   # Install deps and enable service
   msg_info "Installing Python dependencies and enabling service"
-  pct exec "$CT_ID" -- bash -c "
+  pct exec "$RESOLVED_CTID" -- bash -c "
     set -Eeuo pipefail
     . /opt/playlistai/venv/bin/activate
     pip install -r /opt/playlistai/requirements.txt
@@ -150,12 +166,12 @@ EOF"
   msg_ok "PlaylistAI service started"
 
   # Output IP and logging hint
-  IP=$(pct exec "$CT_ID" -- hostname -I | awk '{print $1}')
+  IP=$(pct exec "$RESOLVED_CTID" -- hostname -I | awk '{print $1}')
   echo -e \"\n✅ PlaylistAI is running at http://${IP}:5000\"
-  echo -e \"🗒️ View logs with: pct exec $CT_ID -- journalctl -u playlistai -f\"
+  echo -e \"🗒️ View logs with: pct exec $RESOLVED_CTID -- journalctl -u playlistai -f\"
 }
 
-# ======== Kick off the build using the framework ========
+# ======== Kick off build using the framework ========
 start
 description
 msg_ok "Completed Successfully!"
