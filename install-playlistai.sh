@@ -21,7 +21,7 @@ MEMORY="1024"
 CORE_COUNT="2"
 BRIDGE="vmbr0"
 STORAGE="local-lvm"
-IMAGE="debian-12-standard_2023-07-18_amd64.tar.zst"
+IMAGE="debian-12-standard"
 
 echo "🧠 Creating $APP container (CT $CTID)..."
 pct create $CTID $STORAGE:vztmpl/$IMAGE \
