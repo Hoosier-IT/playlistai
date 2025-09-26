@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # PlaylistAI LXC Installer (TTeck Framework Compatible, Robust CTID)
-# Author: Michael (Hoosier-IT)
+# Author: (Hoosier-IT)
 # License: MIT
 # Version: 4.3
 
