@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # PlaylistAI LXC Installer
 # Description: AI-powered playlist generator using Music Assistant + local LLM
-# Author: (Hoosier-IT)
+# Author: Michael (Hoosier-IT)
 # License: MIT
-# Version: 1.1
+# Version: 1.2
 
 set -Eeuo pipefail
 
@@ -23,7 +23,7 @@ BRIDGE="vmbr0"
 TEMPLATE="debian-12-standard_12.7-1_amd64.tar.zst"
 
 # Detect storage type
-if pvesm status | grep -q 'local-lvm'; then
+if pvesm status | grep -q '^local-lvm'; then
   STORAGE="local-lvm"
   ROOTFS="--rootfs $STORAGE:${DISK_SIZE}G"
 else
