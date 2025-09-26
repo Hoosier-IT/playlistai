@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PlaylistAI LXC Installer
 # Description: AI-powered playlist generator using Music Assistant + local LLM
-# Author: Michael (Hoosier-IT)
+# Author: (Hoosier-IT)
 # License: MIT
 # Version: 2.0 (adaptive)
 
