@@ -1,118 +1,35 @@
 #!/usr/bin/env bash
-# PlaylistAI LXC Installer (Final Adaptive Version with Fixes)
-# Author: Michael (Hoosier-IT)
-# License: MIT
-# Version: 3.3
+source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
 
-set -Eeuo pipefail
-
-# ===== Initialize variables to avoid "unbound variable" errors =====
-MA_API=""
-LLM_API=""
-TOKEN=""
-MUSIC_PATH=""
-
-# ===== Input prompts with validation =====
-while [ -z "$MA_API" ]; do
-  read -rp "🔗 Enter your Music Assistant API URL: " MA_API
-done
-
-while [ -z "$LLM_API" ]; do
-  read -rp "🧠 Enter your LLM API URL: " LLM_API
-done
-
-while [ -z "$TOKEN" ]; do
-  read -rp "🔐 Enter your Home Assistant token: " TOKEN
-done
-
-while [ -z "$MUSIC_PATH" ]; do
-  read -rp "🎵 Enter your music folder path on Proxmox host (default: /mnt/music): " MUSIC_PATH
-  MUSIC_PATH=${MUSIC_PATH:-/mnt/music}
-done
-
+# Metadata
 APP="PlaylistAI"
-CTID=$(pvesh get /cluster/nextid)
-DISK_SIZE="4"       # GB
-MEMORY="1024"       # MB
-CORE_COUNT="2"
+var_os="debian"
+var_version="12"
+var_cpu="2"
+var_ram="1024"
+var_disk="4"
+var_unprivileged="1"
+var_tags="music;llm;flask"
 
-die() { echo "❌ $1" >&2; exit 1; }
+# Custom install logic
+function update_script() {
+  header_info
+  check_container_storage
+  check_container_resources
 
-# ===== Ensure music path exists =====
-if [ ! -d "$MUSIC_PATH" ]; then
-  echo "📁 Creating $MUSIC_PATH"
-  mkdir -p "$MUSIC_PATH" || die "Failed to create $MUSIC_PATH"
-fi
+  msg_info "Installing Python and dependencies"
+  pct exec "$CTID" -- bash -c "
+    apt update &&
+    apt install -y python3 python3-pip python3-venv ca-certificates curl &&
+    python3 -m venv /opt/playlistai/venv
+  "
+  msg_ok "Python installed"
 
-# ===== Detect bridge =====
-BRIDGES=$(ip -o link show | awk -F': ' '{print $2}' | grep -E '^vmbr[0-9]+')
-if grep -q '^vmbr0$' <<<"$BRIDGES"; then
-  BRIDGE="vmbr0"
-elif [ "$(wc -w <<<"$BRIDGES")" -gt 1 ]; then
-  echo "🌉 Multiple bridges detected: $BRIDGES"
-  read -rp "Select bridge to use: " BRIDGE
-else
-  BRIDGE="$BRIDGES"
-fi
-[ -n "$BRIDGE" ] || die "No vmbr bridge found."
+  msg_info "Creating PlaylistAI app files"
+  pct exec "$CTID" -- bash -c "mkdir -p /opt/playlistai"
 
-# ===== Detect storage (prefer local if lvmthin unusable) =====
-STORAGES=$(pvesm status | awk 'NR>1 {print $1}')
-CANDIDATES=()
-for id in $STORAGES; do
-  cfg=$(pvesm config "$id" 2>/dev/null || true)
-  content=$(awk -F': ' '/^content:/{print $2}' <<<"$cfg")
-  [[ "$content" =~ rootdir ]] && CANDIDATES+=("$id")
-done
-[ ${#CANDIDATES[@]} -gt 0 ] || die "No storage supports rootdir."
-
-if [[ " ${CANDIDATES[*]} " =~ " local " ]]; then
-  ROOTSTORE="local"
-elif [[ " ${CANDIDATES[*]} " =~ " local-lvm " ]]; then
-  ROOTSTORE="local-lvm"
-else
-  ROOTSTORE="${CANDIDATES[0]}"
-fi
-ROOTFS="--rootfs ${ROOTSTORE}:${DISK_SIZE}G"
-
-echo "💾 Using storage: $ROOTSTORE"
-echo "🌉 Using bridge: $BRIDGE"
-
-# ===== Detect template =====
-TEMPLATE=$(pveam available | awk '/debian-12-standard/ {print $2}' | tail -n1)
-[ -n "$TEMPLATE" ] || die "No Debian 12 template found in pveam."
-if ! pveam list local | awk '{print $1}' | grep -q "$TEMPLATE"; then
-  echo "📥 Downloading template $TEMPLATE..."
-  pveam download local "$TEMPLATE"
-fi
-
-# ===== Create container =====
-echo "🧠 Creating $APP container (CT $CTID)..."
-pct create "$CTID" "local:vztmpl/$TEMPLATE" \
-  --hostname playlistai \
-  --cores "$CORE_COUNT" \
-  --memory "$MEMORY" \
-  --net0 name=eth0,bridge=$BRIDGE,ip=dhcp \
-  --ostype debian \
-  $ROOTFS \
-  --features nesting=1 \
-  --unprivileged 1 \
-  --mp0 "${MUSIC_PATH},mp=/data/music" \
-  --start 1
-
-# ===== Bootstrap app =====
-echo "📦 Installing Python and dependencies..."
-pct exec "$CTID" -- bash -c "
-  apt update &&
-  apt install -y python3 python3-pip python3-venv ca-certificates curl &&
-  python3 -m venv /opt/playlistai/venv
-"
-
-echo "📁 Creating PlaylistAI app files..."
-pct exec "$CTID" -- bash -c "mkdir -p /opt/playlistai"
-
-# app.py
-pct exec "$CTID" -- bash -c "cat << 'EOF' > /opt/playlistai/app.py
+  # app.py
+  pct exec "$CTID" -- bash -c "cat << 'EOF' > /opt/playlistai/app.py
 import os, json, requests
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
@@ -150,22 +67,25 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF"
 
-# requirements.txt
-pct exec "$CTID" -- bash -c "cat << 'EOF' > /opt/playlistai/requirements.txt
+  # requirements.txt
+  pct exec "$CTID" -- bash -c "cat << 'EOF' > /opt/playlistai/requirements.txt
 flask
 requests
 python-dotenv
 EOF"
 
-# config.env
-pct exec "$CTID" -- bash -c "cat << EOF > /opt/playlistai/config.env
+  # config.env
+  read -rp "🔗 Enter your Music Assistant API URL: " MA_API
+  read -rp "🧠 Enter your LLM API URL: " LLM_API
+  read -rp "🔐 Enter your Home Assistant token: " TOKEN
+  pct exec "$CTID" -- bash -c "cat << EOF > /opt/playlistai/config.env
 MA_API=$MA_API
 LLM_API=$LLM_API
 TOKEN=$TOKEN
 EOF"
 
-# systemd service
-pct exec "$CTID" -- bash -c "cat << 'EOF' > /etc/systemd/system/playlistai.service
+  # systemd service
+  pct exec "$CTID" -- bash -c "cat << 'EOF' > /etc/systemd/system/playlistai.service
 [Unit]
 Description=PlaylistAI Service
 After=network.target
@@ -181,13 +101,19 @@ User=root
 WantedBy=multi-user.target
 EOF"
 
-pct exec "$CTID" -- bash -c "
-  . /opt/playlistai/venv/bin/activate
-  pip install -r /opt/playlistai/requirements.txt
-  systemctl enable playlistai
-  systemctl start playlistai
-"
+  pct exec "$CTID" -- bash -c "
+    . /opt/playlistai/venv/bin/activate &&
+    pip install -r /opt/playlistai/requirements.txt &&
+    systemctl enable playlistai &&
+    systemctl start playlistai
+  "
 
-IP=$(pct exec "$CTID" -- hostname -I | awk '{print $1}')
-echo "✅ $APP is running at http://$IP:5000"
-echo "🗒️ View logs with: pct exec $CTID -- journalctl -u playlistai -f"
+  IP=$(pct exec "$CTID" -- hostname -I | awk '{print $1}')
+  echo -e "\n✅ PlaylistAI is running at http://${IP}:5000"
+  echo -e "🗒️ View logs with: pct exec $CTID -- journalctl -u playlistai -f"
+}
+
+# Trigger build
+start
+description
+msg_ok "Completed Successfully!"
