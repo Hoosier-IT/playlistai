@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PlaylistAI LXC Installer
 # Description: AI-powered playlist generator using Music Assistant + local LLM
-# Author: (Hoosier-IT)
+# Author: Michael (Hoosier-IT)
 # License: MIT
 # Version: 1.0
 
@@ -21,10 +21,10 @@ MEMORY="1024"
 CORE_COUNT="2"
 BRIDGE="vmbr0"
 STORAGE="local-lvm"
-IMAGE="debian-12-standard"
+TEMPLATE="debian-12-standard_12.7-1_amd64.tar.zst"
 
 echo "🧠 Creating $APP container (CT $CTID)..."
-pct create $CTID local:$IMAGE \
+pct create $CTID local:vztmpl/$TEMPLATE \
   --hostname playlistai \
   --cores $CORE_COUNT \
   --memory $MEMORY \
