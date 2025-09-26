@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # PlaylistAI LXC Installer
 # Description: AI-powered playlist generator using Music Assistant + local LLM
-# Author: Michael (Hoosier-IT)
+# Author: (Hoosier-IT)
 # License: MIT
-# Version: 1.0
+# Version: 1.1
 
 set -Eeuo pipefail
 
@@ -20,8 +20,16 @@ DISK_SIZE="4"
 MEMORY="1024"
 CORE_COUNT="2"
 BRIDGE="vmbr0"
-STORAGE="local-lvm"
 TEMPLATE="debian-12-standard_12.7-1_amd64.tar.zst"
+
+# Detect storage type
+if pvesm status | grep -q 'local-lvm'; then
+  STORAGE="local-lvm"
+  ROOTFS="--rootfs $STORAGE:${DISK_SIZE}G"
+else
+  STORAGE="local"
+  ROOTFS="--rootfs $STORAGE,volume=${APP}-root,size=${DISK_SIZE}G"
+fi
 
 echo "🧠 Creating $APP container (CT $CTID)..."
 pct create $CTID local:vztmpl/$TEMPLATE \
@@ -30,7 +38,7 @@ pct create $CTID local:vztmpl/$TEMPLATE \
   --memory $MEMORY \
   --net0 name=eth0,bridge=$BRIDGE,ip=dhcp \
   --ostype debian \
-  --rootfs $STORAGE:${DISK_SIZE}G \
+  $ROOTFS \
   --features nesting=1 \
   --unprivileged 1 \
   --mp0 ${MUSIC_PATH},mp=/data/music \
