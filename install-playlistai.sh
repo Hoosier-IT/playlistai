@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# PlaylistAI LXC Installer (Adaptive + Robust)
-# Description: Deploys a Debian LXC running PlaylistAI (Flask API with Music Assistant + LLM integration)
-# Author: Michael (Hoosier-IT)
+# PlaylistAI LXC Installer (Final Adaptive Version)
+# Author: (Hoosier-IT)
 # License: MIT
-# Version: 3.1
+# Version: 3.2
 
 set -Eeuo pipefail
 
@@ -20,8 +19,10 @@ while [ -z "$TOKEN" ]; do
   read -rp "🔐 Enter your Home Assistant token: " TOKEN
 done
 
-read -rp "🎵 Enter your music folder path on Proxmox host (default: /mnt/music): " MUSIC_PATH
-MUSIC_PATH=${MUSIC_PATH:-/mnt/music}
+while [ -z "$MUSIC_PATH" ]; do
+  read -rp "🎵 Enter your music folder path on Proxmox host (default: /mnt/music): " MUSIC_PATH
+  MUSIC_PATH=${MUSIC_PATH:-/mnt/music}
+done
 
 APP="PlaylistAI"
 CTID=$(pvesh get /cluster/nextid)
@@ -49,7 +50,7 @@ else
 fi
 [ -n "$BRIDGE" ] || die "No vmbr bridge found."
 
-# ===== Detect storage =====
+# ===== Detect storage (force local if lvmthin unusable) =====
 STORAGES=$(pvesm status | awk 'NR>1 {print $1}')
 CANDIDATES=()
 for id in $STORAGES; do
@@ -58,13 +59,19 @@ for id in $STORAGES; do
   [[ "$content" =~ rootdir ]] && CANDIDATES+=("$id")
 done
 [ ${#CANDIDATES[@]} -gt 0 ] || die "No storage supports rootdir."
-if [ ${#CANDIDATES[@]} -gt 1 ]; then
-  echo "💾 Multiple storages support rootdir: ${CANDIDATES[*]}"
-  read -rp "Select storage to use: " ROOTSTORE
+
+# Prefer local if available
+if [[ " ${CANDIDATES[*]} " =~ " local " ]]; then
+  ROOTSTORE="local"
+elif [[ " ${CANDIDATES[*]} " =~ " local-lvm " ]]; then
+  ROOTSTORE="local-lvm"
 else
   ROOTSTORE="${CANDIDATES[0]}"
 fi
 ROOTFS="--rootfs ${ROOTSTORE}:${DISK_SIZE}G"
+
+echo "💾 Using storage: $ROOTSTORE"
+echo "🌉 Using bridge: $BRIDGE"
 
 # ===== Detect template =====
 TEMPLATE=$(pveam available | awk '/debian-12-standard/ {print $2}' | tail -n1)
