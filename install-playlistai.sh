@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # PlaylistAI LXC Installer
 # Description: AI-powered playlist generator using Music Assistant + local LLM
-# Author: (Hoosier-IT)
+# Author: Michael (Hoosier-IT)
 # License: MIT
-# Version: 1.3
+# Version: 2.0 (adaptive)
 
 set -Eeuo pipefail
 
@@ -19,16 +19,26 @@ CTID=$(pvesh get /cluster/nextid)
 DISK_SIZE="4"
 MEMORY="1024"
 CORE_COUNT="2"
-BRIDGE="vmbr0"
-TEMPLATE="debian-12-standard_12.7-1_amd64.tar.zst"
+
+# Detect latest Debian 12 template
+TEMPLATE=$(pveam available | awk '/debian-12-standard/ {print $2}' | tail -n1)
+if ! pveam list local | grep -q "$TEMPLATE"; then
+  echo "📥 Downloading template $TEMPLATE..."
+  pveam download local $TEMPLATE
+fi
 
 # Detect usable storage
-if pvesm list | grep -q '^local-lvm' && pvesm list local-lvm | grep -q 'thin'; then
-  STORAGE="local-lvm"
-  ROOTFS="--rootfs $STORAGE:${DISK_SIZE}G"
+if pvesm status | awk '{print $1}' | grep -qx "local-lvm"; then
+  ROOTFS="--rootfs local-lvm:${DISK_SIZE}G"
 else
-  STORAGE="local"
-  ROOTFS="--rootfs $STORAGE,volume=${APP}-root,size=${DISK_SIZE}G"
+  ROOTFS="--rootfs local:${DISK_SIZE}G"
+fi
+
+# Detect bridge
+if ip link show vmbr0 >/dev/null 2>&1; then
+  BRIDGE="vmbr0"
+else
+  BRIDGE=$(ip -o link show | awk -F': ' '{print $2}' | grep vmbr | head -n1)
 fi
 
 echo "🧠 Creating $APP container (CT $CTID)..."
