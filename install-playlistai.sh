@@ -24,7 +24,7 @@ STORAGE="local-lvm"
 IMAGE="debian-12-standard"
 
 echo "🧠 Creating $APP container (CT $CTID)..."
-pct create $CTID $STORAGE:vztmpl/$IMAGE \
+pct create $CTID local:vztmpl/$IMAGE \
   --hostname playlistai \
   --cores $CORE_COUNT \
   --memory $MEMORY \
