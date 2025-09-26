@@ -1,81 +1,61 @@
 #!/usr/bin/env bash
-# PlaylistAI LXC Installer (TTeck Framework Compatible, Robust CTID)
+# PlaylistAI LXC Installer (TTeck Framework Compatible, CT_ID-safe)
 # Author: Michael (Hoosier-IT)
 # License: MIT
-# Version: 4.1
+# Version: 4.2
 
-# Load TTeck/Community framework
+# Load TTeck/Community framework (build + core + api functions)
 source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
 
-# ========= Metadata / Defaults =========
+# ======== Metadata / Defaults (consumed by the framework) ========
 APP="PlaylistAI"
-var_os="debian"          # OS family
-var_version="12"         # Debian version
-var_unprivileged="1"     # Unprivileged container
-var_disk="4"             # GB
+var_os="debian"            # OS family
+var_version="12"           # Debian version
+var_unprivileged="1"       # Unprivileged container
+var_disk="4"               # GB
 var_cpu="2"
-var_ram="1024"           # MiB
+var_ram="1024"             # MiB
 var_tags="music;llm;flask"
-var_hostname="playlistai"  # Ensure we can resolve CTID reliably
+var_hostname="playlistai"  # Hostname of the LXC (used by the framework)
 
-# ========= Description shown post-install =========
+# ======== Post-install description ========
 function description() {
   echo -e "PlaylistAI: Flask API that curates playlists using Music Assistant and an LLM."
   echo -e "Binds your host music folder into /data/music inside the container."
 }
 
-# ========= Install steps run AFTER container is created =========
-# Name MUST be 'install' to comply with TTeck framework expectations
-function install() {
+# ======== Post-creation steps (runs after the framework builds the CT) ========
+# IMPORTANT: Use CT_ID provided by the framework; do not resolve CTID yourself.
+function update_script() {
   header_info
 
-  # Resolve CTID robustly: prefer framework CTID, fall back to hostname lookup
-  local RESOLVED_CTID=""
-  if [ -n "${CTID:-}" ]; then
-    RESOLVED_CTID="$CTID"
-  else
-    # Find by hostname set above
-    RESOLVED_CTID=$(pct list | awk '\
-      BEGIN {id=""} \
-      NR>1 && $4=="'"$var_hostname"'" {id=$1} \
-      END {print id}')
-  fi
-  if [ -z "$RESOLVED_CTID" ]; then
-    msg_error "Could not resolve container ID (CTID). Aborting."
-    exit 1
-  fi
-
-  # Prompt for inputs with validation (no empty inputs allowed)
+  # Validate and collect inputs (no empty answers)
   local MA_API="" LLM_API="" TOKEN="" MUSIC_PATH=""
-
   while [ -z "$MA_API" ]; do
     read -rp "🔗 Enter your Music Assistant API URL: " MA_API
   done
-
   while [ -z "$LLM_API" ]; do
     read -rp "🧠 Enter your LLM API URL: " LLM_API
   done
-
   while [ -z "$TOKEN" ]; do
     read -rp "🔐 Enter your Home Assistant token: " TOKEN
   done
-
   while [ -z "$MUSIC_PATH" ]; do
     read -rp "🎵 Enter your music folder path on Proxmox host (default: /mnt/music): " MUSIC_PATH
     MUSIC_PATH=${MUSIC_PATH:-/mnt/music}
   done
 
-  # Ensure host directory exists, then bind-mount into CT
+  # Prepare and mount host music directory into the container
   msg_info "Preparing host music directory"
   if [ ! -d "$MUSIC_PATH" ]; then
     mkdir -p "$MUSIC_PATH" || { msg_error "Failed to create $MUSIC_PATH"; exit 1; }
   fi
-  pct set "$RESOLVED_CTID" -mp0 "${MUSIC_PATH},mp=/data/music"
+  pct set "$CT_ID" -mp0 "${MUSIC_PATH},mp=/data/music"
   msg_ok "Host music directory mounted to /data/music"
 
-  # Install Python and create venv inside CT
-  msg_info "Installing Python and dependencies in container $RESOLVED_CTID"
-  pct exec "$RESOLVED_CTID" -- bash -c "
+  # Install Python + venv inside the container
+  msg_info "Installing Python and dependencies in container $CT_ID"
+  pct exec "$CT_ID" -- bash -c "
     set -Eeuo pipefail
     apt update
     apt install -y python3 python3-pip python3-venv ca-certificates curl
@@ -84,9 +64,9 @@ function install() {
   "
   msg_ok "Python environment ready"
 
-  # Write app files
+  # Write application files
   msg_info "Creating PlaylistAI application files"
-  pct exec "$RESOLVED_CTID" -- bash -c "cat << 'EOF' > /opt/playlistai/app.py
+  pct exec "$CT_ID" -- bash -c "cat << 'EOF' > /opt/playlistai/app.py
 import os, json, requests
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
@@ -129,20 +109,20 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF"
 
-  pct exec "$RESOLVED_CTID" -- bash -c "cat << 'EOF' > /opt/playlistai/requirements.txt
+  pct exec "$CT_ID" -- bash -c "cat << 'EOF' > /opt/playlistai/requirements.txt
 flask
 requests
 python-dotenv
 EOF"
 
-  pct exec "$RESOLVED_CTID" -- bash -c "cat << EOF > /opt/playlistai/config.env
+  pct exec "$CT_ID" -- bash -c "cat << EOF > /opt/playlistai/config.env
 MA_API=$MA_API
 LLM_API=$LLM_API
 TOKEN=$TOKEN
 EOF"
 
-  # systemd service
-  pct exec "$RESOLVED_CTID" -- bash -c "cat << 'EOF' > /etc/systemd/system/playlistai.service
+  # Systemd service
+  pct exec "$CT_ID" -- bash -c "cat << 'EOF' > /etc/systemd/system/playlistai.service
 [Unit]
 Description=PlaylistAI Service
 After=network.target
@@ -158,9 +138,9 @@ User=root
 WantedBy=multi-user.target
 EOF"
 
-  # Install Python deps and start service
+  # Install deps and enable service
   msg_info "Installing Python dependencies and enabling service"
-  pct exec "$RESOLVED_CTID" -- bash -c "
+  pct exec "$CT_ID" -- bash -c "
     set -Eeuo pipefail
     . /opt/playlistai/venv/bin/activate
     pip install -r /opt/playlistai/requirements.txt
@@ -169,13 +149,13 @@ EOF"
   "
   msg_ok "PlaylistAI service started"
 
-  # Show IP and logging hint
-  IP=$(pct exec "$RESOLVED_CTID" -- hostname -I | awk '{print $1}')
-  echo -e "\n✅ PlaylistAI is running at http://${IP}:5000"
-  echo -e "🗒️ View logs with: pct exec $RESOLVED_CTID -- journalctl -u playlistai -f"
+  # Output IP and logging hint
+  IP=$(pct exec "$CT_ID" -- hostname -I | awk '{print $1}')
+  echo -e \"\n✅ PlaylistAI is running at http://${IP}:5000\"
+  echo -e \"🗒️ View logs with: pct exec $CT_ID -- journalctl -u playlistai -f\"
 }
 
-# ========= Kick off build using framework =========
+# ======== Kick off the build using the framework ========
 start
 description
 msg_ok "Completed Successfully!"
