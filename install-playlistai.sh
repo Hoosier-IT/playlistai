@@ -11,11 +11,17 @@ var_disk="4"
 var_unprivileged="1"
 var_tags="music;llm;flask"
 
-# Custom install logic
+NEXTID=$(pvesh get /cluster/nextid)
+CTID=${var_ctid:-$NEXTID}
+
 function update_script() {
   header_info
   check_container_storage
   check_container_resources
+
+  read -rp "🔗 Enter your Music Assistant API URL: " MA_API
+  read -rp "🧠 Enter your LLM API URL: " LLM_API
+  read -rp "🔐 Enter your Home Assistant token: " TOKEN
 
   msg_info "Installing Python and dependencies"
   pct exec "$CTID" -- bash -c "
@@ -75,9 +81,6 @@ python-dotenv
 EOF"
 
   # config.env
-  read -rp "🔗 Enter your Music Assistant API URL: " MA_API
-  read -rp "🧠 Enter your LLM API URL: " LLM_API
-  read -rp "🔐 Enter your Home Assistant token: " TOKEN
   pct exec "$CTID" -- bash -c "cat << EOF > /opt/playlistai/config.env
 MA_API=$MA_API
 LLM_API=$LLM_API
@@ -113,7 +116,6 @@ EOF"
   echo -e "🗒️ View logs with: pct exec $CTID -- journalctl -u playlistai -f"
 }
 
-# Trigger build
 start
 description
 msg_ok "Completed Successfully!"
