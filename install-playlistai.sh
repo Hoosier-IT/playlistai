@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
-# PlaylistAI LXC Installer (Final Adaptive Version)
-# Author: (Hoosier-IT)
+# PlaylistAI LXC Installer (Final Adaptive Version with Fixes)
+# Author: Michael (Hoosier-IT)
 # License: MIT
-# Version: 3.2
+# Version: 3.3
 
 set -Eeuo pipefail
+
+# ===== Initialize variables to avoid "unbound variable" errors =====
+MA_API=""
+LLM_API=""
+TOKEN=""
+MUSIC_PATH=""
 
 # ===== Input prompts with validation =====
 while [ -z "$MA_API" ]; do
@@ -50,7 +56,7 @@ else
 fi
 [ -n "$BRIDGE" ] || die "No vmbr bridge found."
 
-# ===== Detect storage (force local if lvmthin unusable) =====
+# ===== Detect storage (prefer local if lvmthin unusable) =====
 STORAGES=$(pvesm status | awk 'NR>1 {print $1}')
 CANDIDATES=()
 for id in $STORAGES; do
@@ -60,7 +66,6 @@ for id in $STORAGES; do
 done
 [ ${#CANDIDATES[@]} -gt 0 ] || die "No storage supports rootdir."
 
-# Prefer local if available
 if [[ " ${CANDIDATES[*]} " =~ " local " ]]; then
   ROOTSTORE="local"
 elif [[ " ${CANDIDATES[*]} " =~ " local-lvm " ]]; then
@@ -99,7 +104,7 @@ pct create "$CTID" "local:vztmpl/$TEMPLATE" \
 echo "📦 Installing Python and dependencies..."
 pct exec "$CTID" -- bash -c "
   apt update &&
-  apt install -y python3 python3-pip python3-venv ca-certificates curl
+  apt install -y python3 python3-pip python3-venv ca-certificates curl &&
   python3 -m venv /opt/playlistai/venv
 "
 
