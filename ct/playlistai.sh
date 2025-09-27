@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # PlaylistAI LXC Container Script
-# Author: (Hoosier-IT)
+# Author: Michael (Hoosier-IT)
 # License: MIT
 
 # Source the community-scripts build functions
