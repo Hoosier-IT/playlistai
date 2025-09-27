@@ -30,11 +30,11 @@ function update_script() {
   header_info
   msg_info "Running PlaylistAI installation inside container $CTID"
 
-  # ❌ Old line (causing issues):
-  # lxc-attach -n "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/install/${var_install}.sh)"
+  # ❌ Old (community-scripts, 404s)
+  # pct exec "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/install/${var_install}.sh)"
 
-  # ✅ Corrected line (run your installer from your repo using Proxmox-native pct exec):
-  pct exec "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/Hoosier-IT/playlistai/main/install/playlistai-install.sh)"
+  # ✅ Temporary fix: run our own wrapper
+  pct exec "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/Hoosier-IT/playlistai/main/install/playlistai-temp.sh)"
 
   msg_ok "PlaylistAI installation complete"
 }
