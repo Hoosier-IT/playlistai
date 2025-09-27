@@ -1,0 +1,14 @@
+{
+  "name": "PlaylistAI",
+  "categories": ["Music", "AI", "Flask"],
+  "description": "Flask API that curates playlists using Music Assistant and an LLM. Binds your host music folder into /data/music inside the container.",
+  "platform": "LXC",
+  "os": "Debian 12",
+  "resources": {
+    "cpu": "2",
+    "ram": "1024",
+    "disk": "4"
+  },
+  "unprivileged": true,
+  "tags": ["music", "llm", "flask"]
+}
