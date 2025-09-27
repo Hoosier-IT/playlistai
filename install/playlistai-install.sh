@@ -12,9 +12,10 @@ function install_script() {
   header_info
 
   # Prompt for inputs
-  local MA_API="" LLM_API="" TOKEN="" MUSIC_PATH=""
+  local MA_API="" LLM_API="" TOKEN="" MUSIC_PATH="" HA_WS_URL=""
+
   while [ -z "$MA_API" ]; do
-    read -rp "🔗 Enter your Music Assistant API URL: " MA_API
+    read -rp "🔗 Enter your Music Assistant API URL (standalone, e.g. http://192.168.3.10:8095): " MA_API
   done
   while [ -z "$LLM_API" ]; do
     read -rp "🧠 Enter your LLM API URL: " LLM_API
@@ -26,6 +27,9 @@ function install_script() {
     read -rp "🎵 Enter your music folder path on Proxmox host (default: /mnt/music): " MUSIC_PATH
     MUSIC_PATH=${MUSIC_PATH:-/mnt/music}
   done
+  while [ -z "$HA_WS_URL" ]; do
+    read -rp "🌐 Enter your HA WebSocket URL (e.g. ws://homeassistant.home:8123/api/websocket): " HA_WS_URL
+  done
 
   msg_info "Installing Python and dependencies"
   apt update
@@ -35,82 +39,86 @@ function install_script() {
   msg_ok "Python environment ready"
 
   msg_info "Creating PlaylistAI files"
+
+  # app.py
   cat << 'EOF' > /opt/playlistai/app.py
-import os, json, requests
+import os
+import json
+import asyncio
+import requests
+import websockets
+import logging
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 
+# Load environment variables
 load_dotenv()
+
 app = Flask(__name__)
-MA_API = os.getenv('MA_API')
-LLM_API = os.getenv('LLM_API')
-TOKEN = os.getenv('TOKEN')
+
+MA_API = os.getenv("MA_API")
+LLM_API = os.getenv("LLM_API")
+TOKEN = os.getenv("TOKEN")
+HA_WS_URL = os.getenv("HA_WS_URL")
+
+logger = logging.getLogger("playlistai")
+logger.setLevel(logging.INFO)
+
+_cached_mode = None  # "rest" or "ws"
 
 def fetch_library():
-    headers = {'Authorization': f'Bearer {TOKEN}'}
-    r = requests.get(f'{MA_API}/media/library', headers=headers, timeout=15)
-    r.raise_for_status()
-    return r.json()
+    global _cached_mode
+    if _cached_mode == "rest":
+        return _fetch_library_rest()
+    elif _cached_mode == "ws":
+        return asyncio.run(fetch_library_ws())
 
-def query_llm(library_json, prompt):
-    payload = {'messages': [
-        {'role': 'system', 'content': 'You are a music curator.'},
-        {'role': 'user', 'content': f'{prompt}\\n\\n{json.dumps(library_json)}'}
-    ]}
-    r = requests.post(LLM_API, json=payload, timeout=30)
-    r.raise_for_status()
-    data = r.json()
-    if isinstance(data, dict):
-        if 'choices' in data:
-            return data['choices'][0]['message']['content']
-        if 'message' in data:
-            return data['message']
-    return json.dumps(data)
+    try:
+        data = _fetch_library_rest()
+        if data:
+            _cached_mode = "rest"
+            return data
+    except Exception as e:
+        logger.warning("PlaylistAI: REST API failed (%s), trying WebSocket", e)
 
-@app.route('/generate', methods=['POST'])
-def generate_playlist():
-    prompt = request.json.get('prompt', '')
-    library = fetch_library()
-    playlist = query_llm(library, prompt)
-    return jsonify({'playlist': playlist})
+    try:
+        data = asyncio.run(fetch_library_ws())
+        _cached_mode = "ws"
+        return data
+    except Exception as e:
+        logger.error("PlaylistAI: Both REST and WebSocket failed (%s)", e)
+        raise
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
-EOF
+def _fetch_library_rest():
+    headers = {"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}
+    for path in ("/library", "/v1/library"):
+        url = f"{MA_API.rstrip('/')}{path}"
+        try:
+            r = requests.get(url, headers=headers, timeout=10)
+            if r.status_code == 200:
+                logger.info("PlaylistAI: Using REST API at %s", url)
+                return r.json()
+        except Exception as e:
+            logger.debug("PlaylistAI: REST attempt %s failed: %s", url, e)
+    return None
 
-  cat << 'EOF' > /opt/playlistai/requirements.txt
-flask
-requests
-python-dotenv
-EOF
+async def fetch_library_ws():
+    async with websockets.connect(HA_WS_URL) as ws:
+        await ws.recv()
+        await ws.send(json.dumps({
+            "type": "auth",
+            "access_token": TOKEN
+        }))
+        auth_result = await ws.recv()
+        logger.info("PlaylistAI: WebSocket auth result: %s", auth_result)
 
-  cat << EOF > /opt/playlistai/config.env
-MA_API=$MA_API
-LLM_API=$LLM_API
-TOKEN=$TOKEN
-EOF
-
-  cat << 'EOF' > /etc/systemd/system/playlistai.service
-[Unit]
-Description=PlaylistAI Service
-After=network.target
-
-[Service]
-WorkingDirectory=/opt/playlistai
-EnvironmentFile=/opt/playlistai/config.env
-ExecStart=/opt/playlistai/venv/bin/python /opt/playlistai/app.py
-Restart=always
-User=root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-  . /opt/playlistai/venv/bin/activate
-  pip install -r /opt/playlistai/requirements.txt
-  systemctl enable playlistai
-  systemctl start playlistai
-  msg_ok "PlaylistAI service started"
-}
-
-install_script
+        await ws.send(json.dumps({
+            "id": 1,
+            "type": "call_service",
+            "domain": "music_assistant",
+            "service": "get_library",
+            "service_data": {}
+        }))
+        response = await ws.recv()
+        logger.info("PlaylistAI: Using HA WebSocket API at %s", HA_WS_URL)
+        return json.loads(response
