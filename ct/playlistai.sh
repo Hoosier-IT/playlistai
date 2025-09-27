@@ -26,15 +26,16 @@ function description() {
   echo -e "Binds your host music folder into /data/music inside the container."
 }
 
+# ✅ Explicit override of update_script
 function update_script() {
   header_info
   msg_info "Running PlaylistAI installation inside container $CTID"
 
   # ❌ Old (community-scripts, 404s)
-  # pct exec "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/install/${var_install}.sh)"
+  # lxc-attach -n "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/install/${var_install}.sh)"
 
-  # ✅ Temporary fix: run our own wrapper
-  pct exec "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/Hoosier-IT/playlistai/main/install/playlistai-temp.sh)"
+  # ✅ Correct: run your own installer from your repo
+  pct exec "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/Hoosier-IT/playlistai/main/install/playlistai-install.sh)"
 
   msg_ok "PlaylistAI installation complete"
 }
