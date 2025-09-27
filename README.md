@@ -11,8 +11,11 @@ It runs inside a lightweight Debian 12 LXC container on Proxmox VE.
   - LLM API URL
   - Home Assistant Long‑Lived Access Token
   - Host music folder path
-- Generates a Flask app inside the container
-- Binds your host music folder into `/data/music` inside the container
+  - Home Assistant WebSocket URL (for add‑on mode)
+- Auto‑detects whether you’re running **standalone Music Assistant (REST API)** or the **Home Assistant add‑on (WebSocket API)**.
+- Caches the chosen mode after the first successful call for speed and reliability.
+- Generates a Flask app inside the container.
+- Binds your host music folder into `/data/music` inside the container.
 - Starts a systemd service at:  
   `http://<CT_IP>:5000/generate`
 
