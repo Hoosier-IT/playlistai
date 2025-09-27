@@ -1,21 +1,35 @@
 # PlaylistAI LXC Installer
 
-AI-powered playlist generator using Music Assistant and local LLMs. Fully self-contained—no GitHub repo required.
+PlaylistAI is a Flask API that curates playlists using [Music Assistant](https://music-assistant.io/) and an LLM.  
+It runs inside a lightweight Debian 12 LXC container on Proxmox VE.
 
-## Features
-- Interactive prompts for MA_API, LLM_API, Home Assistant Longlive TOKEN, and volume path
-- Generates Flask app inside container
-- Starts service at `http://<CT_IP>:5000`
-- Includes uninstall script
+---
 
-## Usage
+## ✨ Features
+- Interactive prompts for:
+  - Music Assistant API URL
+  - LLM API URL
+  - Home Assistant Long‑Lived Access Token
+  - Host music folder path
+- Generates a Flask app inside the container
+- Binds your host music folder into `/data/music` inside the container
+- Starts a systemd service at:  
+  `http://<CT_IP>:5000/generate`
 
-### Install
+---
+
+## 📦 Default Container Settings
+- **OS:** Debian 12  
+- **Type:** Unprivileged  
+- **Disk:** 4 GB  
+- **CPU:** 2 cores  
+- **RAM:** 1024 MiB  
+
+---
+
+## 🚀 Installation
+
+Run the following command on your Proxmox host:
+
 ```bash
-chmod +x install-playlistai.sh
-./install-playlistai.sh
-```
-### Uninstall
-```bash
-chmod +x uninstall-playlistai.sh
-./uninstall-playlistai.sh
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/Hoosier-IT/playlistai/main/ct/playlistai.sh)"
