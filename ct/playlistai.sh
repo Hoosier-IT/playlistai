@@ -29,7 +29,13 @@ function description() {
 function update_script() {
   header_info
   msg_info "Running PlaylistAI installation inside container $CTID"
-  pct exec "$CTID" -- bash -c "bash -s" < <(curl -fsSL https://raw.githubusercontent.com/Hoosier-IT/playlistai/main/install/playlistai-install.sh)
+
+  # ❌ Old line (causing issues):
+  # pct exec "$CTID" -- bash -c "bash -s" < <(curl -fsSL https://raw.githubusercontent.com/Hoosier-IT/playlistai/main/install/playlistai-install.sh)
+
+  # ✅ Corrected line:
+  lxc-attach -n "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/Hoosier-IT/playlistai/main/install/playlistai-install.sh)"
+
   msg_ok "PlaylistAI installation complete"
 }
 
